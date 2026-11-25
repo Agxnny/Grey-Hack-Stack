@@ -1,0 +1,37 @@
+// Grey Hack - Wi-Fi inventory (v0.1)
+// Usage: wifi_inventory [interface]
+// Stores a snapshot of discovered networks in the current directory.
+computer = get_shell.host_computer
+device = "wlan0"
+if params.len > 0 then device = params[0]
+
+print("Wireless interface: " + device)
+networks = computer.wifi_networks(device)
+if typeof(networks) != "list" then
+    exit("Scan failed: " + str(networks))
+end if
+
+filename = "wifi_networks.txt"
+path = current_path
+file = computer.File(path + "/" + filename)
+if file == null then
+    result = computer.touch(path, filename)
+    if result != 1 then exit("Cannot create inventory: " + str(result))
+    file = computer.File(path + "/" + filename)
+end if
+if file == null then exit("Cannot open inventory file")
+
+seen = {}
+output = ""
+for network in networks
+    line = str(network)
+    if not seen.hasIndex(line) then
+        seen[line] = 1
+        output = output + line + char(10)
+        print(line)
+    end if
+end for
+
+result = file.set_content(output)
+if result != 1 then exit("Cannot save inventory: " + str(result))
+print("Saved " + seen.len + " unique records to " + filename)
