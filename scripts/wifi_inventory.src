@@ -1,15 +1,37 @@
-// Grey Hack - Wi-Fi inventory (v0.1)
+// Grey Hack - Wi-Fi inventory (v0.2)
 // Usage: wifi_inventory [interface]
-// Stores a snapshot of discovered networks in the current directory.
 computer = get_shell.host_computer
-device = "wlan0"
-if params.len > 0 then device = params[0]
-
+device = ""
+if params.len > 0 then
+    device = params[0]
+else
+    devices = computer.network_devices
+    if typeof(devices) != "string" then exit("Cannot read network devices")
+    for row in devices.split(char(10))
+        fields = row.split(" ")
+        if fields.len > 0 then
+            if fields[0].indexOf("wlan") == 0 then
+                device = fields[0]
+                break
+            end if
+        end if
+    end for
+end if
+if device == "" then exit("No wireless interface found")
 print("Wireless interface: " + device)
 networks = computer.wifi_networks(device)
-if typeof(networks) != "list" then
-    exit("Scan failed: " + str(networks))
-end if
+if typeof(networks) != "list" then exit("Scan failed: " + str(networks))
+
+parse = function(line)
+    fields = line.split(" ")
+    if fields.len < 3 then return null
+    if fields[0].len != 17 then return null
+    power = fields[1]
+    if power[-1:] != "%" then return null
+    signal = val(power[:-1])
+    if signal < 0 or signal > 100 then return null
+    return {"bssid": fields[0], "signal": signal, "line": line}
+end function
 
 filename = "wifi_networks.txt"
 path = current_path
@@ -21,17 +43,51 @@ if file == null then
 end if
 if file == null then exit("Cannot open inventory file")
 
-seen = {}
-output = ""
-for network in networks
-    line = str(network)
-    if not seen.hasIndex(line) then
-        seen[line] = 1
-        output = output + line + char(10)
-        print(line)
+records = {}
+old = file.get_content
+if typeof(old) != "string" then exit("Cannot read inventory")
+for line in old.split(char(10))
+    if line != "" then
+        item = parse(line)
+        if item == null then exit("Invalid existing inventory row: " + line)
+        records[item.bssid] = item
     end if
 end for
 
+current = {}
+for network in networks
+    item = parse(str(network))
+    if item == null then
+        print("Skipping invalid scan row: " + str(network))
+    else
+        current[item.bssid] = item
+        records[item.bssid] = item
+    end if
+end for
+
+// Select maximum repeatedly; avoids relying on map-key sort support.
+ordered = function(source)
+    remaining = source.values
+    output = []
+    while remaining.len > 0
+        best = 0
+        for i in range(0, remaining.len - 1)
+            if remaining[i].signal > remaining[best].signal then best = i
+        end for
+        output.push(remaining[best])
+        remaining.remove(best)
+    end while
+    return output
+end function
+
+for item in ordered(current)
+    print(item.line)
+end for
+output = ""
+for item in ordered(records)
+    output = output + item.line + char(10)
+end for
 result = file.set_content(output)
 if result != 1 then exit("Cannot save inventory: " + str(result))
-print("Saved " + seen.len + " unique records to " + filename)
+print("Current networks: " + current.len)
+print("Saved records: " + records.len)
